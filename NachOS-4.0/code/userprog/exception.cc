@@ -249,7 +249,9 @@ void ExceptionHandler(ExceptionType which)
 			else
 				kernel->machine->WriteRegister(2, -1); // Return -1
 
-			break;
+			IncreasePC();
+			return;
+			
 		}
 		case SC_Write:
 		{
@@ -300,7 +302,9 @@ void ExceptionHandler(ExceptionType which)
 			else
 				kernel->machine->WriteRegister(2, -1); // Return -1
 
-			break;
+			IncreasePC();
+			return;
+			
 		}
 		case SC_ReadChar:
 		{
@@ -523,6 +527,7 @@ void ExceptionHandler(ExceptionType which)
 				kernel->machine->WriteRegister(2, pos);
 			}
 			IncreasePC();
+			return;
 			break;
 		}
 
