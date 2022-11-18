@@ -80,6 +80,7 @@ public:
 	}
 	int GetCurrentPos()
 	{
+		currentOffset = Tell(file);
 		return currentOffset;
 	}
 
@@ -96,7 +97,7 @@ class OpenFile
 public:
 	OpenFile(int sector); // Open a file whose header is located
 						  // at "sector" on the disk
-	~OpenFile(); // Close the file
+	~OpenFile();		  // Close the file
 
 	void Seek(int position); // Set the position from which to
 							 // start reading/writing -- UNIX lseek
@@ -116,6 +117,10 @@ public:
 				  // file (this interface is simpler
 				  // than the UNIX idiom -- lseek to
 				  // end of file, tell, lseek back
+	int GetCurrentPos()
+	{
+		return seekPosition;
+	}
 
 private:
 	FileHeader *hdr;  // Header for this file
