@@ -282,52 +282,64 @@ void ExceptionHandler(ExceptionType which)
 		}
 		case SC_Write:
 		{
-			int address = kernel->machine->ReadRegister(4);	  // memory starting position
-			int size = kernel->machine->ReadRegister(5);	  // read "size" bytes
-			OpenFileId id = kernel->machine->ReadRegister(6); // OpenFile object id
-			int ind = kernel->fileSystem->index;
+			int virtAddr = kernel->machine->ReadRegister(4);
+			int charcount = kernel->machine->ReadRegister(5);
+			int openf_id = kernel->machine->ReadRegister(6);
+			int i = kernel->fileSystem->index;
 
-			DEBUG(dbgFile, "\n  SC_Write call ...");
-
-			if (id > ind || id < 0 || id == 0) // `out of domain` filesys + try to write to stdin
+			if (openf_id > i || openf_id < 0 || openf_id == 0) // `out of domain` filesys + try to write to stdin
 			{
 				kernel->machine->WriteRegister(2, -1);
-				break;
+				IncreasePC();
+				return;
 			}
 
-			if (kernel->fileSystem->openf[id] == NULL)
+			if (kernel->fileSystem->openf[openf_id] == NULL)
 			{
 				kernel->machine->WriteRegister(2, -1);
-				break;
+				IncreasePC();
+				return;
 			}
 
 			// read-only file
-			if (kernel->fileSystem->openf[id]->type == 1)
+			if (kernel->fileSystem->openf[openf_id]->type == 1)
 			{
 				printf("Try to modify read-only file");
 				kernel->machine->WriteRegister(2, -1);
-				break;
+				IncreasePC();
+				return;
 			}
 
-			char *buffer = new char[size];
-			bool checkErr = true;
-			for (int i = 0; i < size; i++)
-			{ // each time write one byte
-				bool success = kernel->machine->ReadMem(address + i, 1, (int *)&buffer[i]);
-				if (!success)
+			// write to console
+			char *buf = User2System(virtAddr, charcount);
+			if (openf_id == 1)
+			{
+				int i = 0;
+				while (buf[i] != '\0' && buf[i] != '\n')
 				{
-					checkErr = false;
-					break;
+					kernel->synchConsoleOut->PutChar(buf[i]);
+					i++;
 				}
-			}
-			OpenFile *openFile = (OpenFile *)id; // transfer id back to OpenFile
-			int numBytes = openFile->Write(buffer, size);
+				buf[i] = '\n';
+				kernel->synchConsoleOut->PutChar(buf[i]); // write last character
 
-			// DEBUG(dbgFile, "Write %d bytes into file.\n", numBytes);
-			if (checkErr)
-				kernel->machine->WriteRegister(2, numBytes); // Return the number of bytes actually read
-			else
-				kernel->machine->WriteRegister(2, -1); // Return -1
+				kernel->machine->WriteRegister(2, i - 1);
+				delete[] buf;
+				IncreasePC();
+				return;
+			}
+
+			// write into file
+			int before = kernel->fileSystem->openf[openf_id]->GetCurrentPos();
+			if ((kernel->fileSystem->openf[openf_id]->Write(buf, charcount)) != 0)
+			{
+				int after = kernel->fileSystem->openf[openf_id]->GetCurrentPos();
+				System2User(virtAddr, after - before, buf);
+				kernel->machine->WriteRegister(2, after - before + 1);
+				delete[] buf;
+				IncreasePC();
+				return;
+			}
 
 			IncreasePC();
 			return;
