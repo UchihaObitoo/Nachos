@@ -207,91 +207,76 @@ void ExceptionHandler(ExceptionType which)
 		}
 		case SC_Read:
 		{
-			// int address = kernel->machine->ReadRegister(4);	  // memory starting position
-			// int size = kernel->machine->ReadRegister(5);	  // read "size" bytes
-			// OpenFileId id = kernel->machine->ReadRegister(6); // OpenFile object id
-			// int ind = kernel->fileSystem->index;
-
-			// DEBUG(dbgFile, "\n SC_Read call ...");
-
-			// if (id > ind || id < 0 || id == 1) // go wrong <-- if try open `out of domain` fileSystem (10 openfile)
-			// {								   // or try to read stdout
-			// 	printf("Try to open invalid file");
-			// 	kernel->machine->WriteRegister(2, -1);
-			// 	break;
-			// }
-
-			// if (kernel->fileSystem->openf[id] == NULL)
-			// {
-			// 	kernel->machine->WriteRegister(2, -1);
-			// 	break;
-			// }
-
-			// OpenFile *openFile = (OpenFile *)id; // transfer id back to OpenFile
-			// char *buffer = new char[size];
-			// int numBytes = openFile->Read(buffer, size);
-
-			// bool checkErr = true;
-			// for (int i = 0; i < numBytes; i++)
-			// { // each time write one byte
-			// 	bool success = kernel->machine->WriteMem(address + i, 1, (int)buffer[i]);
-			// 	if (!success)
-			// 	{
-			// 		checkErr = false;
-			// 		break;
-			// 	}
-			// }
-			// // DEBUG(dbgFile, "Read %d bytes into buffer.\n", numBytes);
-			// if (checkErr)
-			// 	kernel->machine->WriteRegister(2, numBytes); // Return the number of bytes actually read
-			// else
-			// 	kernel->machine->WriteRegister(2, -1); // Return -1
-
-			int virtAddr = kernel->machine->ReadRegister(4);
-			int charcount = kernel->machine->ReadRegister(5);
-			int openf_id = kernel->machine->ReadRegister(6);
-			int i = kernel->fileSystem->index;
-
-			if (openf_id > i || openf_id < 0 || openf_id == 1) // go wrong <-- if try open `out of domain` fileSystem (10 openfile)
-			{												   // or try to read stdout
-				printf("Try to open invalid file");
+			int virtAddr = kernel->machine->ReadRegister(4);  // Lay dia chi cua tham so buffer tu thanh ghi so 4
+			int charcount = kernel->machine->ReadRegister(5); // Lay charcount tu thanh ghi so 5
+			int id = kernel->machine->ReadRegister(6);        // Lay id cua file tu thanh ghi so 6
+			int OldPos;
+			int NewPos;
+			char *buf;
+			// Kiem tra id cua file truyen vao co nam ngoai bang mo ta file khong
+			if (id < 0 || id > 14)
+			{
+				printf("\nKhong the read vi id nam ngoai bang mo ta file.");
 				kernel->machine->WriteRegister(2, -1);
 				IncreasePC();
-				break;
+				return;
 			}
-
-			if (kernel->fileSystem->openf[openf_id] == NULL)
+			// Kiem tra file co ton tai khong
+			if (kernel->fileSystem->openf[id] == NULL)
 			{
+				printf("\nKhong the read vi file nay khong ton tai.");
 				kernel->machine->WriteRegister(2, -1);
 				IncreasePC();
-				break;
+				return;
 			}
-
-			char *buf = User2System(virtAddr, charcount);
-
-			if (openf_id == 0) // read from stdin
+			if (kernel->fileSystem->openf[id]->type == 3) // Xet truong hop doc file stdout (type quy uoc la 3) thi tra ve -1
 			{
-				int sz = kernel->synchConsoleIn->Read(buf, charcount);
-				System2User(virtAddr, sz, buf);
-				kernel->machine->WriteRegister(2, sz);
+				printf("\nKhong the read file stdout.");
+				kernel->machine->WriteRegister(2, -1);
+				IncreasePC();
+				return;
+			}
+			OldPos = kernel->fileSystem->openf[id]->GetCurrentPos(); // Kiem tra thanh cong thi lay vi tri OldPos
+			buf = User2System(virtAddr, charcount);                  // Copy chuoi tu vung nho User Space sang System Space voi bo dem buffer dai charcount
+			// Xet truong hop doc file stdin (type quy uoc la 2)
+			if (kernel->fileSystem->openf[id]->type == 2)
+			{
+				// Su dung ham Read cua lop SynchConsole de tra ve so byte thuc su doc duoc
+				int size = 0;
+				for (int i = 0; i < charcount; ++i)
+				{
+				size = size + 1;
+				buf[i] = kernel->synchConsoleIn->GetChar();
+				//Quy uoc chuoi ket thuc la \n
+				if (buf[i] == '\n')
+				{
+					buf[i + 1] = '\0';
+					break;
+				}
+				}
+				buf[size] = '\0';
+				System2User(virtAddr, size, buf);        // Copy chuoi tu vung nho System Space sang User Space voi bo dem buffer co do dai la so byte thuc su
+				kernel->machine->WriteRegister(2, size); // Tra ve so byte thuc su doc duoc
+				delete buf;
+				IncreasePC();
+				return;
+			}
+			// Xet truong hop doc file binh thuong thi tra ve so byte thuc su
+			if ((kernel->fileSystem->openf[id]->Read(buf, charcount)) > 0)
+			{
+				// So byte thuc su = NewPos - OldPos
+				NewPos = kernel->fileSystem->openf[id]->GetCurrentPos();
+				// Copy chuoi tu vung nho System Space sang User Space voi bo dem buffer co do dai la so byte thuc su
+				System2User(virtAddr, NewPos - OldPos, buf);
+				kernel->machine->WriteRegister(2, NewPos - OldPos);
 			}
 			else
 			{
-				int before = kernel->fileSystem->openf[openf_id]->GetCurrentPos();
-				if ((kernel->fileSystem->openf[openf_id]->Read(buf, charcount)) > 0)
-				{
-					// copy data from kernel to user space
-					int after = kernel->fileSystem->openf[openf_id]->GetCurrentPos();
-					System2User(virtAddr, charcount, buf);
-					kernel->machine->WriteRegister(2, after - before + 1); // after & before just used for returning
-				}
-				else
-				{
-					kernel->machine->WriteRegister(2, -1);
-				}
+				// Truong hop con lai la doc file co noi dung la NULL tra ve -2
+				//printf("\nDoc file rong.");
+				kernel->machine->WriteRegister(2, -2);
 			}
-
-			delete[] buf;
+			delete buf;
 			IncreasePC();
 			return;
 		}
