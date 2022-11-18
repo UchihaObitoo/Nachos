@@ -92,8 +92,6 @@ void IncreasePC()
 	kernel->machine->WriteRegister(NextPCReg, kernel->machine->ReadRegister(PCReg) + 4);
 }
 
-
-
 //----------------------------------------------------------------------
 // ExceptionHandler
 // 	Entry point into the Nachos kernel.  Called when a user program
@@ -131,7 +129,7 @@ void ExceptionHandler(ExceptionType which)
 		{
 		case SC_Halt:
 		{
-			
+
 			SysHalt();
 
 			ASSERTNOTREACHED();
@@ -209,49 +207,93 @@ void ExceptionHandler(ExceptionType which)
 		}
 		case SC_Read:
 		{
-			int address = kernel->machine->ReadRegister(4);	  // memory starting position
-			int size = kernel->machine->ReadRegister(5);	  // read "size" bytes
-			OpenFileId id = kernel->machine->ReadRegister(6); // OpenFile object id
-			int ind = kernel->fileSystem->index;
+			// int address = kernel->machine->ReadRegister(4);	  // memory starting position
+			// int size = kernel->machine->ReadRegister(5);	  // read "size" bytes
+			// OpenFileId id = kernel->machine->ReadRegister(6); // OpenFile object id
+			// int ind = kernel->fileSystem->index;
 
-			DEBUG(dbgFile, "\n SC_Read call ...");
+			// DEBUG(dbgFile, "\n SC_Read call ...");
 
-			if (id > ind || id < 0 || id == 1) // go wrong <-- if try open `out of domain` fileSystem (10 openfile)
-			{								   // or try to read stdout
+			// if (id > ind || id < 0 || id == 1) // go wrong <-- if try open `out of domain` fileSystem (10 openfile)
+			// {								   // or try to read stdout
+			// 	printf("Try to open invalid file");
+			// 	kernel->machine->WriteRegister(2, -1);
+			// 	break;
+			// }
+
+			// if (kernel->fileSystem->openf[id] == NULL)
+			// {
+			// 	kernel->machine->WriteRegister(2, -1);
+			// 	break;
+			// }
+
+			// OpenFile *openFile = (OpenFile *)id; // transfer id back to OpenFile
+			// char *buffer = new char[size];
+			// int numBytes = openFile->Read(buffer, size);
+
+			// bool checkErr = true;
+			// for (int i = 0; i < numBytes; i++)
+			// { // each time write one byte
+			// 	bool success = kernel->machine->WriteMem(address + i, 1, (int)buffer[i]);
+			// 	if (!success)
+			// 	{
+			// 		checkErr = false;
+			// 		break;
+			// 	}
+			// }
+			// // DEBUG(dbgFile, "Read %d bytes into buffer.\n", numBytes);
+			// if (checkErr)
+			// 	kernel->machine->WriteRegister(2, numBytes); // Return the number of bytes actually read
+			// else
+			// 	kernel->machine->WriteRegister(2, -1); // Return -1
+
+			int virtAddr = kernel->machine->ReadRegister(4);
+			int charcount = kernel->machine->ReadRegister(5);
+			int openf_id = kernel->machine->ReadRegister(6);
+			int i = kernel->fileSystem->index;
+
+			if (openf_id > i || openf_id < 0 || openf_id == 1) // go wrong <-- if try open `out of domain` fileSystem (10 openfile)
+			{												   // or try to read stdout
 				printf("Try to open invalid file");
 				kernel->machine->WriteRegister(2, -1);
+				IncreasePC();
 				break;
 			}
 
-			if (kernel->fileSystem->openf[id] == NULL)
+			if (kernel->fileSystem->openf[openf_id] == NULL)
 			{
 				kernel->machine->WriteRegister(2, -1);
+				IncreasePC();
 				break;
 			}
 
-			OpenFile *openFile = (OpenFile *)id; // transfer id back to OpenFile
-			char *buffer = new char[size];
-			int numBytes = openFile->Read(buffer, size);
+			char *buf = User2System(virtAddr, charcount);
 
-			bool checkErr = true;
-			for (int i = 0; i < numBytes; i++)
-			{ // each time write one byte
-				bool success = kernel->machine->WriteMem(address + i, 1, (int)buffer[i]);
-				if (!success)
+			if (openf_id == 0) // read from stdin
+			{
+				int sz = kernel->synchConsoleIn->Read(buf, charcount);
+				System2User(virtAddr, sz, buf);
+				kernel->machine->WriteRegister(2, sz);
+			}
+			else
+			{
+				int before = kernel->fileSystem->openf[openf_id]->GetCurrentPos();
+				if ((kernel->fileSystem->openf[openf_id]->Read(buf, charcount)) > 0)
 				{
-					checkErr = false;
-					break;
+					// copy data from kernel to user space
+					int after = kernel->fileSystem->openf[openf_id]->GetCurrentPos();
+					System2User(virtAddr, charcount, buf);
+					kernel->machine->WriteRegister(2, after - before + 1); // after & before just used for returning
+				}
+				else
+				{
+					kernel->machine->WriteRegister(2, -1);
 				}
 			}
-			// DEBUG(dbgFile, "Read %d bytes into buffer.\n", numBytes);
-			if (checkErr)
-				kernel->machine->WriteRegister(2, numBytes); // Return the number of bytes actually read
-			else
-				kernel->machine->WriteRegister(2, -1); // Return -1
 
+			delete[] buf;
 			IncreasePC();
 			return;
-			
 		}
 		case SC_Write:
 		{
@@ -304,7 +346,6 @@ void ExceptionHandler(ExceptionType which)
 
 			IncreasePC();
 			return;
-			
 		}
 		case SC_ReadChar:
 		{
@@ -531,89 +572,93 @@ void ExceptionHandler(ExceptionType which)
 			break;
 		}
 
-		
 		case SC_Open:
 		{
 			DEBUG(dbgSys, "\n SC_Open calling ...");
 			int virtAddr = kernel->machine->ReadRegister(4); // Lay dia chi cua tham so name tu thanh ghi so 4
-			int type = kernel->machine->ReadRegister(5); // Lay tham so type tu thanh ghi so 5
-			char* filename;
+			int type = kernel->machine->ReadRegister(5);	 // Lay tham so type tu thanh ghi so 5
+			char *filename;
 			filename = User2System(virtAddr, MaxFileLength); // Copy chuoi tu vung nho User Space sang System Space voi bo dem name dai MaxFileLength
-			
-			// index la so file dang duoc mo 
+
+			// index la so file dang duoc mo
 			int index = kernel->fileSystem->index;
 			// printf("%d \n", index);
 
-			//Kiem tra xem OS con mo dc file khong
-			if(index >= 15){
+			// Kiem tra xem OS con mo dc file khong
+			if (index >= 15)
+			{
 				DEBUG(dbgSys, "\n Do not enough slot for open file ...");
-				kernel->machine->WriteRegister(2, -1); 
+				kernel->machine->WriteRegister(2, -1);
 			}
-			else{
-				if (type == 0 || type == 1) //chi xu li khi type = 0 hoac 1
+			else
+			{
+				if (type == 0 || type == 1) // chi xu li khi type = 0 hoac 1
 				{
-					
+
 					int OpenFileID = -1;
-					for (int i = 2; i ++ ; i < 15 ){
-						if(kernel->fileSystem->openf[i] == NULL){
-							OpenFileID= i;
+					for (int i = 2; i++; i < 15)
+					{
+						if (kernel->fileSystem->openf[i] == NULL)
+						{
+							OpenFileID = i;
 							break;
 						}
 					}
 					printf("%d \n", OpenFileID);
-					if(OpenFileID == -1){
+					if (OpenFileID == -1)
+					{
 						DEBUG(dbgSys, "\n Can not open file ...");
-						kernel->machine->WriteRegister(2, -1); 
+						kernel->machine->WriteRegister(2, -1);
 					}
-					else{
+					else
+					{
 						kernel->fileSystem->openf[OpenFileID] = kernel->fileSystem->Open(filename, type);
 
 						// deep copy filename vao table descriptor
 						kernel->fileSystem->tableDescriptor[OpenFileID] = new char[strlen(filename) + 1];
-						for (int i = 0; i < strlen(filename); i ++){
+						for (int i = 0; i < strlen(filename); i++)
+						{
 							kernel->fileSystem->tableDescriptor[OpenFileID][i] = filename[i];
 						}
 						kernel->fileSystem->tableDescriptor[OpenFileID][strlen(filename)] = '\0';
 
 						kernel->fileSystem->index += 1;
 						DEBUG(dbgSys, "\n Open file Success ...");
-						kernel->machine->WriteRegister(2, OpenFileID); 
+						kernel->machine->WriteRegister(2, OpenFileID);
 					}
 				}
 				else // xu li khi type khong hop le
 				{
 					DEBUG(dbgSys, "\n Error Type ...");
-					kernel->machine->WriteRegister(2, -1); 
+					kernel->machine->WriteRegister(2, -1);
 				}
 			}
-			printf("%d %s \n",3, kernel->fileSystem->tableDescriptor[3]);
-			//Khong mo duoc file return -1
-			
+			printf("%d %s \n", 3, kernel->fileSystem->tableDescriptor[3]);
+			// Khong mo duoc file return -1
 
 			delete[] filename;
 			IncreasePC();
 			return;
 			break;
-
 		}
 
 		case SC_Close:
 		{
-			//Input id cua file(OpenFileID)
-			// Output: 0: thanh cong, -1 that bai
+			// Input id cua file(OpenFileID)
+			//  Output: 0: thanh cong, -1 that bai
 			int fid = kernel->machine->ReadRegister(4); // Lay id cua file tu thanh ghi so 4
-			if (fid >= 0 && fid <= 14) //Chi xu li khi fid nam trong [0, 14]
+			if (fid >= 0 && fid <= 14)					// Chi xu li khi fid nam trong [0, 14]
 			{
-				if (kernel->fileSystem->openf[fid]) //neu dang mo file
+				if (kernel->fileSystem->openf[fid]) // neu dang mo file
 				{
-					delete kernel->fileSystem->openf[fid]; //Xoa vung nho luu tru file
-					kernel->fileSystem->openf[fid] = NULL; //Gan vung nho NULL
+					delete kernel->fileSystem->openf[fid]; // Xoa vung nho luu tru file
+					kernel->fileSystem->openf[fid] = NULL; // Gan vung nho NULL
 					kernel->fileSystem->index -= 1;
 					kernel->machine->WriteRegister(2, 0);
 
-
 					// xoa trong bang table Descriptor
-					if(kernel->fileSystem->tableDescriptor[fid] != NULL){
+					if (kernel->fileSystem->tableDescriptor[fid] != NULL)
+					{
 						delete kernel->fileSystem->tableDescriptor[fid];
 					}
 					kernel->fileSystem->tableDescriptor[fid] = NULL;
@@ -623,11 +668,14 @@ void ExceptionHandler(ExceptionType which)
 					return;
 					break;
 				}
-				else{
+				else
+				{
 					DEBUG(dbgSys, "\n Can not close file ...");
 					kernel->machine->WriteRegister(2, -1);
 				}
-			}else{
+			}
+			else
+			{
 				DEBUG(dbgSys, "\n Can not close file ...");
 				kernel->machine->WriteRegister(2, -1);
 			}
@@ -640,24 +688,29 @@ void ExceptionHandler(ExceptionType which)
 		{
 			DEBUG(dbgSys, "\n SC_Remove calling ...");
 			int virtAddr = kernel->machine->ReadRegister(4); // Lay dia chi cua tham so name tu thanh ghi so 4
-			char* filename;
+			char *filename;
 			filename = User2System(virtAddr, MaxFileLength); // Copy chuoi tu vung nho User Space sang System Space voi bo dem name dai MaxFileLength
-			
-			for( int i = 3 ; i < 20 ; i ++){
-				
-				if (kernel->fileSystem->tableDescriptor[i]!= NULL && strcmp(filename, kernel->fileSystem->tableDescriptor[i]) == 0){
+
+			for (int i = 3; i < 20; i++)
+			{
+
+				if (kernel->fileSystem->tableDescriptor[i] != NULL && strcmp(filename, kernel->fileSystem->tableDescriptor[i]) == 0)
+				{
 					DEBUG(dbgSys, "\n cannot remove file (file is openning) ...");
 					kernel->machine->WriteRegister(2, -1);
 					IncreasePC();
 					return;
-
 				}
 			}
-		
-			if(kernel->fileSystem->Remove(filename)){
+
+			if (kernel->fileSystem->Remove(filename))
+			{
 				DEBUG(dbgSys, "\n Remove file success...");
-				kernel->machine->WriteRegister(2, 0);;
-			}else{
+				kernel->machine->WriteRegister(2, 0);
+				;
+			}
+			else
+			{
 				DEBUG(dbgSys, "\n Can not found file ...");
 				kernel->machine->WriteRegister(2, -1);
 			}
@@ -666,14 +719,11 @@ void ExceptionHandler(ExceptionType which)
 			break;
 		}
 
-		
 		default:
 			cerr << "Unexpected system call " << type << "\n";
 			break;
 		}
 		break;
-	
-
 
 	case NoException:
 		kernel->interrupt->setStatus(SystemMode);
